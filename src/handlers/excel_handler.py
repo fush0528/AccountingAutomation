@@ -30,6 +30,9 @@ class ExcelHandler:
             self.workbook = load_workbook(self.file_path)
             self.worksheet = self.workbook.active
             return self._validate_workbook()
+        except FileNotFoundError:
+            print(f"找不到檔案：{self.file_path}")
+            return False
         except Exception as e:
             print(f"載入工作簿時發生錯誤: {e}")
             return False
@@ -56,23 +59,31 @@ class ExcelHandler:
             if not any(row):  # 跳過空行
                 continue
             
-            entry_dict = {
-                'date': row[0],
-                'platform': row[1],
-                'product_name': row[2],
-                'order_quantity': row[3],
-                'total_sales': row[4],
-                'platform_fee': row[5],
-                'actual_income': row[6],
-                'invoice_required': bool(row[7]),
-                'taxable': bool(row[8])
-            }
             try:
+                # 確保日期是字串格式
+                date_value = row[0]
+                if isinstance(date_value, datetime):
+                    date_str = date_value.isoformat()
+                else:
+                    date_str = str(date_value)
+
+                entry_dict = {
+                    'date': date_str,
+                    'platform': str(row[1]),
+                    'product_name': str(row[2]),
+                    'order_quantity': int(row[3]),
+                    'total_sales': float(row[4]),
+                    'platform_fee': float(row[5]),
+                    'actual_income': float(row[6]),
+                    'invoice_required': bool(row[7]),
+                    'taxable': bool(row[8])
+                }
                 entry = AccountingEntry.from_dict(entry_dict)
                 if entry.validate():
                     entries.append(entry)
             except Exception as e:
                 print(f"讀取記帳項目時發生錯誤: {e}")
+                continue
 
         return entries
 
@@ -136,14 +147,21 @@ class ExcelHandler:
                 values_only=True
             ))[0]
 
+            # 確保日期是字串格式
+            date_value = row[0]
+            if isinstance(date_value, datetime):
+                date_str = date_value.isoformat()
+            else:
+                date_str = str(date_value)
+
             entry_dict = {
-                'date': row[0],
-                'platform': row[1],
-                'product_name': row[2],
-                'order_quantity': row[3],
-                'total_sales': row[4],
-                'platform_fee': row[5],
-                'actual_income': row[6],
+                'date': date_str,
+                'platform': str(row[1]),
+                'product_name': str(row[2]),
+                'order_quantity': int(row[3]),
+                'total_sales': float(row[4]),
+                'platform_fee': float(row[5]),
+                'actual_income': float(row[6]),
                 'invoice_required': bool(row[7]),
                 'taxable': bool(row[8])
             }
@@ -158,6 +176,20 @@ class ExcelHandler:
         if not self.worksheet:
             return False
 
-        # 檢查是否有標題列
-        headers = [cell.value for cell in next(self.worksheet.iter_rows(max_row=1))]
-        return all(header == expected for header, expected in zip(headers, self.headers))
+        try:
+            # 檢查是否為空白工作表
+            if self.worksheet.max_row < 1:
+                # 如果是空白的，加入標題列
+                self.worksheet.append(self.headers)
+                return True
+
+            # 檢查標題列
+            headers = [cell.value for cell in next(self.worksheet.iter_rows(max_row=1))]
+            if not all(header == expected for header, expected in zip(headers, self.headers)):
+                # 如果標題不符合預期，清空工作表並加入正確的標題
+                self.worksheet.delete_rows(1, self.worksheet.max_row)
+                self.worksheet.append(self.headers)
+            return True
+        except Exception as e:
+            print(f"驗證工作簿時發生錯誤: {e}")
+            return False
