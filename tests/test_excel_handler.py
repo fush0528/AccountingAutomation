@@ -18,16 +18,21 @@ class TestExcelHandler(unittest.TestCase):
         wb = Workbook()
         ws = wb.active
         headers = [
-            'date', 'platform', 'product_name', 'order_quantity',
-            'total_sales', 'platform_fee', 'actual_income',
-            'invoice_required', 'taxable'
+            '年份', '月份', '日期', '時間',
+            '平台', '商品名稱', '訂單數量',
+            '銷售總額', '平台費用', '實收金額',
+            '需要發票', '應稅'
         ]
         ws.append(headers)
         wb.save(self.test_file)
         
         self.handler = ExcelHandler(self.test_file)
+        now = self.test_date
         self.test_entry = AccountingEntry(
-            date=self.test_date,
+            year=str(now.year),
+            month=str(now.month).zfill(2),
+            day=str(now.day).zfill(2),
+            time=now.strftime('%H:%M:%S'),
             platform="蝦皮",
             product_name="測試商品",
             order_quantity=1,
@@ -59,7 +64,11 @@ class TestExcelHandler(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         entry = entries[0]
         
-        self.assertEqual(entry.date.date(), self.test_date.date())
+        now = self.test_date
+        self.assertEqual(entry.year, str(now.year))
+        self.assertEqual(entry.month, str(now.month).zfill(2))
+        self.assertEqual(entry.day, str(now.day).zfill(2))
+        self.assertEqual(entry.time, now.strftime('%H:%M:%S'))
         self.assertEqual(entry.platform, "蝦皮")
         self.assertEqual(entry.product_name, "測試商品")
         self.assertEqual(entry.order_quantity, 1)
@@ -73,8 +82,12 @@ class TestExcelHandler(unittest.TestCase):
         self.handler.add_entry(self.test_entry)
         
         # 建立更新後的項目
+        now = self.test_date
         updated_entry = AccountingEntry(
-            date=self.test_date,
+            year=str(now.year),
+            month=str(now.month).zfill(2),
+            day=str(now.day).zfill(2),
+            time=now.strftime('%H:%M:%S'),
             platform="蝦皮",
             product_name="更新商品",
             order_quantity=2,

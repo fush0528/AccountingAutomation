@@ -19,9 +19,10 @@ class ExcelHandler:
         self.workbook: Optional[Workbook] = None
         self.worksheet: Optional[Worksheet] = None
         self.headers = [
-            'date', 'platform', 'product_name', 'order_quantity',
-            'total_sales', 'platform_fee', 'actual_income',
-            'invoice_required', 'taxable'
+            '年份', '月份', '日期', '時間',
+            '平台', '商品名稱', '訂單數量',
+            '銷售總額', '平台費用', '實收金額',
+            '需要發票', '應稅'
         ]
 
     def load_workbook(self) -> bool:
@@ -60,23 +61,19 @@ class ExcelHandler:
                 continue
             
             try:
-                # 確保日期是字串格式
-                date_value = row[0]
-                if isinstance(date_value, datetime):
-                    date_str = date_value.isoformat()
-                else:
-                    date_str = str(date_value)
-
                 entry_dict = {
-                    'date': date_str,
-                    'platform': str(row[1]),
-                    'product_name': str(row[2]),
-                    'order_quantity': int(row[3]),
-                    'total_sales': float(row[4]),
-                    'platform_fee': float(row[5]),
-                    'actual_income': float(row[6]),
-                    'invoice_required': bool(row[7]),
-                    'taxable': bool(row[8])
+                    'year': str(row[0]),
+                    'month': str(row[1]),
+                    'day': str(row[2]),
+                    'time': str(row[3]),
+                    'platform': str(row[4]),
+                    'product_name': str(row[5]),
+                    'order_quantity': int(row[6]),
+                    'total_sales': float(row[7]),
+                    'platform_fee': float(row[8]),
+                    'actual_income': float(row[9]),
+                    'invoice_required': bool(row[10]),
+                    'taxable': bool(row[11])
                 }
                 entry = AccountingEntry.from_dict(entry_dict)
                 if entry.validate():
@@ -94,7 +91,8 @@ class ExcelHandler:
 
         try:
             row_values = [
-                entry.date, entry.platform, entry.product_name,
+                entry.year, entry.month, entry.day, entry.time,
+                entry.platform, entry.product_name,
                 entry.order_quantity, entry.total_sales, entry.platform_fee,
                 entry.actual_income, entry.invoice_required, entry.taxable
             ]
@@ -112,7 +110,8 @@ class ExcelHandler:
         try:
             # Excel 的列索引從 1 開始
             row_values = [
-                entry.date, entry.platform, entry.product_name,
+                entry.year, entry.month, entry.day, entry.time,
+                entry.platform, entry.product_name,
                 entry.order_quantity, entry.total_sales, entry.platform_fee,
                 entry.actual_income, entry.invoice_required, entry.taxable
             ]
@@ -147,23 +146,19 @@ class ExcelHandler:
                 values_only=True
             ))[0]
 
-            # 確保日期是字串格式
-            date_value = row[0]
-            if isinstance(date_value, datetime):
-                date_str = date_value.isoformat()
-            else:
-                date_str = str(date_value)
-
             entry_dict = {
-                'date': date_str,
-                'platform': str(row[1]),
-                'product_name': str(row[2]),
-                'order_quantity': int(row[3]),
-                'total_sales': float(row[4]),
-                'platform_fee': float(row[5]),
-                'actual_income': float(row[6]),
-                'invoice_required': bool(row[7]),
-                'taxable': bool(row[8])
+                'year': str(row[0]),
+                'month': str(row[1]),
+                'day': str(row[2]),
+                'time': str(row[3]),
+                'platform': str(row[4]),
+                'product_name': str(row[5]),
+                'order_quantity': int(row[6]),
+                'total_sales': float(row[7]),
+                'platform_fee': float(row[8]),
+                'actual_income': float(row[9]),
+                'invoice_required': bool(row[10]),
+                'taxable': bool(row[11])
             }
             entry = AccountingEntry.from_dict(entry_dict)
             return entry if entry.validate() else None

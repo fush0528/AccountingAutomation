@@ -8,9 +8,12 @@ class TestAccountingEntry(unittest.TestCase):
 
     def setUp(self):
         """設定測試環境"""
-        self.test_date = datetime.now()
+        now = datetime.now()
         self.valid_entry = AccountingEntry(
-            date=self.test_date,
+            year=str(now.year),
+            month=str(now.month).zfill(2),
+            day=str(now.day).zfill(2),
+            time=now.strftime('%H:%M:%S'),
             platform="蝦皮",
             product_name="測試商品",
             order_quantity=1,
@@ -20,7 +23,11 @@ class TestAccountingEntry(unittest.TestCase):
 
     def test_init(self):
         """測試初始化"""
-        self.assertEqual(self.valid_entry.date, self.test_date)
+        now = datetime.now()
+        self.assertEqual(self.valid_entry.year, str(now.year))
+        self.assertEqual(self.valid_entry.month, str(now.month).zfill(2))
+        self.assertEqual(self.valid_entry.day, str(now.day).zfill(2))
+        self.assertEqual(self.valid_entry.time, now.strftime('%H:%M:%S'))
         self.assertEqual(self.valid_entry.platform, "蝦皮")
         self.assertEqual(self.valid_entry.product_name, "測試商品")
         self.assertEqual(self.valid_entry.order_quantity, 1)
@@ -37,7 +44,11 @@ class TestAccountingEntry(unittest.TestCase):
     def test_to_dict(self):
         """測試轉換為字典格式"""
         entry_dict = self.valid_entry.to_dict()
-        self.assertEqual(entry_dict['date'], self.test_date.isoformat())
+        now = datetime.now()
+        self.assertEqual(entry_dict['year'], str(now.year))
+        self.assertEqual(entry_dict['month'], str(now.month).zfill(2))
+        self.assertEqual(entry_dict['day'], str(now.day).zfill(2))
+        self.assertEqual(entry_dict['time'], now.strftime('%H:%M:%S'))
         self.assertEqual(entry_dict['platform'], "蝦皮")
         self.assertEqual(entry_dict['product_name'], "測試商品")
         self.assertEqual(entry_dict['order_quantity'], 1)
@@ -51,7 +62,10 @@ class TestAccountingEntry(unittest.TestCase):
         """測試從字典格式建立物件"""
         entry_dict = self.valid_entry.to_dict()
         new_entry = AccountingEntry.from_dict(entry_dict)
-        self.assertEqual(new_entry.date.isoformat(), self.test_date.isoformat())
+        self.assertEqual(new_entry.year, self.valid_entry.year)
+        self.assertEqual(new_entry.month, self.valid_entry.month)
+        self.assertEqual(new_entry.day, self.valid_entry.day)
+        self.assertEqual(new_entry.time, self.valid_entry.time)
         self.assertEqual(new_entry.platform, self.valid_entry.platform)
         self.assertEqual(new_entry.product_name, self.valid_entry.product_name)
         self.assertEqual(new_entry.order_quantity, self.valid_entry.order_quantity)
@@ -66,9 +80,12 @@ class TestAccountingEntry(unittest.TestCase):
         # 測試有效資料
         self.assertTrue(self.valid_entry.validate())
 
-        # 測試無效日期
+        # 測試無效年份
         invalid_entry = AccountingEntry(
-            date="2023-01-01",  # 錯誤的日期格式
+            year="",  # 空的年份
+            month="01",
+            day="01",
+            time="12:00:00",
             platform="蝦皮",
             product_name="測試商品",
             order_quantity=1,
@@ -79,7 +96,10 @@ class TestAccountingEntry(unittest.TestCase):
 
         # 測試無效的訂單數量
         invalid_entry = AccountingEntry(
-            date=self.test_date,
+            year="2023",
+            month="01",
+            day="01",
+            time="12:00:00",
             platform="蝦皮",
             product_name="測試商品",
             order_quantity=-1,  # 負數訂單數量
@@ -90,7 +110,10 @@ class TestAccountingEntry(unittest.TestCase):
 
         # 測試手續費大於銷售額
         invalid_entry = AccountingEntry(
-            date=self.test_date,
+            year="2023",
+            month="01",
+            day="01",
+            time="12:00:00",
             platform="蝦皮",
             product_name="測試商品",
             order_quantity=1,

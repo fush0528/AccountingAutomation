@@ -6,7 +6,10 @@ from typing import Dict, Any
 @dataclass
 class AccountingEntry:
     """記帳項目的主要資料結構，包含所有必要的記帳資訊"""
-    date: datetime
+    year: str
+    month: str
+    day: str
+    time: str
     platform: str
     product_name: str
     order_quantity: int
@@ -27,7 +30,10 @@ class AccountingEntry:
     def to_dict(self) -> Dict[str, Any]:
         """將物件轉換為字典格式"""
         return {
-            'date': self.date.isoformat(),
+            'year': self.year,
+            'month': self.month,
+            'day': self.day,
+            'time': self.time,
             'platform': self.platform,
             'product_name': self.product_name,
             'order_quantity': self.order_quantity,
@@ -41,13 +47,25 @@ class AccountingEntry:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AccountingEntry':
         """從字典格式建立物件"""
-        # 將 ISO 格式的日期字串轉換為 datetime 物件
-        data['date'] = datetime.fromisoformat(data['date'])
+        if 'date' in data:
+            # 處理舊格式的日期
+            dt = datetime.fromisoformat(data['date'])
+            data['year'] = str(dt.year)
+            data['month'] = str(dt.month).zfill(2)
+            data['day'] = str(dt.day).zfill(2)
+            data['time'] = dt.strftime('%H:%M:%S')
+            del data['date']
         return cls(**data)
 
     def validate(self) -> bool:
         """驗證資料的正確性"""
-        if not isinstance(self.date, datetime):
+        if not isinstance(self.year, str) or not self.year.strip():
+            return False
+        if not isinstance(self.month, str) or not self.month.strip():
+            return False
+        if not isinstance(self.day, str) or not self.day.strip():
+            return False
+        if not isinstance(self.time, str) or not self.time.strip():
             return False
         if not isinstance(self.platform, str) or not self.platform.strip():
             return False

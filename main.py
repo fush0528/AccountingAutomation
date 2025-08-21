@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import datetime
 from src.handlers import ExcelHandler
 from src.models import AccountingEntry
@@ -8,13 +9,21 @@ import os
 def initialize_excel_file(file_path: str) -> bool:
     """初始化 Excel 檔案，建立標題列"""
     try:
-        if not os.path.exists(file_path):
+        # 確保目錄存在
+        directory = os.path.dirname(file_path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"已建立目錄：{directory}")
+
+        # 如果檔案不存在或是空檔案，建立新檔案
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
             workbook = Workbook()
             worksheet = workbook.active
             headers = [
-                'date', 'platform', 'product_name', 'order_quantity',
-                'total_sales', 'platform_fee', 'actual_income',
-                'invoice_required', 'taxable'
+                '年份', '月份', '日期', '時間',
+                '平台', '商品名稱', '訂單數量',
+                '銷售總額', '平台費用', '實收金額',
+                '需要發票', '應稅'
             ]
             worksheet.append(headers)
             workbook.save(file_path)
@@ -27,12 +36,18 @@ def initialize_excel_file(file_path: str) -> bool:
 
 def main():
     """記帳自動化系統主程式"""
-    file_path = "AccountingAutomation.xlsx"
+    # 設定預設的檔案路徑
+    file_path = os.path.join("data", "AccountingAutomation.xlsx")
+    
+    print("=== 歡迎使用記帳自動化系統 ===")
+    print("系統初始化中...")
     
     # 確保 Excel 檔案存在且格式正確
     if not initialize_excel_file(file_path):
         print("錯誤：無法初始化 Excel 檔案")
         return
+    else:
+        print("Excel檔案檢查完成")
 
     # 初始化 Excel 處理器
     handler = ExcelHandler(file_path)
@@ -85,7 +100,10 @@ def add_entry(handler: ExcelHandler):
         print("\n=== 新增記帳項目 ===")
         print("請依序輸入以下資料：")
         print("格式範例：")
-        print("日期：2023-08-19")
+        print("年份：2023")
+        print("月份：08")
+        print("日期：19")
+        print("時間：14:30:00")
         print("平台名稱：蝦皮")
         print("商品名稱：測試商品")
         print("訂單數量：2")
@@ -96,8 +114,10 @@ def add_entry(handler: ExcelHandler):
         print("-" * 30)
         
         try:
-            date_str = input("請輸入日期 (YYYY-MM-DD): ").strip()
-            date = datetime.strptime(date_str, "%Y-%m-%d")
+            year = input("請輸入年份 (YYYY): ").strip()
+            month = input("請輸入月份 (MM): ").strip()
+            day = input("請輸入日期 (DD): ").strip()
+            time = input("請輸入時間 (HH:MM:SS): ").strip()
             
             platform = input("請輸入平台名稱: ").strip()
             product_name = input("請輸入商品名稱: ").strip()
@@ -108,7 +128,10 @@ def add_entry(handler: ExcelHandler):
             taxable = input("是否課稅 (y/n): ").strip().lower() == 'y'
 
             entry = AccountingEntry(
-                date=date,
+                year=year,
+                month=month,
+                day=day,
+                time=time,
                 platform=platform,
                 product_name=product_name,
                 order_quantity=order_quantity,
@@ -120,7 +143,10 @@ def add_entry(handler: ExcelHandler):
 
             if entry.validate():
                 if handler.add_entry(entry):
-                    print("記帳項目新增成功！")
+                    if handler.save_workbook():
+                        print("記帳項目新增成功！")
+                    else:
+                        print("錯誤：無法儲存變更")
                 else:
                     print("錯誤：無法新增記帳項目")
             else:
@@ -148,7 +174,10 @@ def view_entries(handler: ExcelHandler):
 
     for i, entry in enumerate(entries, 1):
         print(f"\n--- 項目 {i} ---")
-        print(f"日期：{entry.date.strftime('%Y-%m-%d')}")
+        print(f"年份：{entry.year}")
+        print(f"月份：{entry.month}")
+        print(f"日期：{entry.day}")
+        print(f"時間：{entry.time}")
         print(f"平台：{entry.platform}")
         print(f"商品：{entry.product_name}")
         print(f"數量：{entry.order_quantity}")
@@ -176,8 +205,17 @@ def update_entry(handler: ExcelHandler):
         print("請輸入新的資料（直接按 Enter 保持原值）：")
 
         try:
-            date_str = input(f"日期 ({entry.date.strftime('%Y-%m-%d')}): ").strip()
-            date = datetime.strptime(date_str, "%Y-%m-%d") if date_str else entry.date
+            year = input(f"年份 ({entry.year}): ").strip()
+            year = year if year else entry.year
+            
+            month = input(f"月份 ({entry.month}): ").strip()
+            month = month if month else entry.month
+            
+            day = input(f"日期 ({entry.day}): ").strip()
+            day = day if day else entry.day
+            
+            time = input(f"時間 ({entry.time}): ").strip()
+            time = time if time else entry.time
             
             platform = input(f"平台名稱 ({entry.platform}): ").strip()
             platform = platform if platform else entry.platform
@@ -201,7 +239,10 @@ def update_entry(handler: ExcelHandler):
             taxable = (taxable_str.lower() == 'y') if taxable_str else entry.taxable
 
             updated_entry = AccountingEntry(
-                date=date,
+                year=year,
+                month=month,
+                day=day,
+                time=time,
                 platform=platform,
                 product_name=product_name,
                 order_quantity=order_quantity,
@@ -213,7 +254,10 @@ def update_entry(handler: ExcelHandler):
 
             if updated_entry.validate():
                 if handler.update_entry(row_index, updated_entry):
-                    print("記帳項目更新成功！")
+                    if handler.save_workbook():
+                        print("記帳項目更新成功！")
+                    else:
+                        print("錯誤：無法儲存變更")
                 else:
                     print("錯誤：無法更新記帳項目")
             else:
@@ -244,7 +288,10 @@ def delete_entry(handler: ExcelHandler):
         confirm = input("確定要刪除這個項目嗎？(y/n): ").strip()
         if confirm.lower() == 'y':
             if handler.delete_entry(row_index):
-                print("記帳項目刪除成功！")
+                if handler.save_workbook():
+                    print("記帳項目刪除成功！")
+                else:
+                    print("錯誤：無法儲存變更")
             else:
                 print("錯誤：刪除失敗")
         else:
