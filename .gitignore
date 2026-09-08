@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 測試與工具快取
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# 資料庫與產生的資料（合成資料由 scripts/gen_fixtures.py 重建，不入版控）
+*.db
+*.sqlite3
+data/generated/
+
+# 編輯器
+.vscode/
+.idea/
+*.swp
+.DS_Store
