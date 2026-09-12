@@ -8,7 +8,9 @@ version = "0.2.0"
 description = "多平台電商對帳引擎"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "openpyxl>=3.1",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -48,6 +50,12 @@ pretty = true
 module = "legacy.*"
 ignore_errors = true
 
+# openpyxl 沒有提供型別資訊。它只在 platform_b 的 _load_rows 裡用到，
+# 而且回傳值立刻經過 clean_cell() 收斂成 str，界線很窄。
+[[tool.mypy.overrides]]
+module = "openpyxl.*"
+ignore_missing_imports = true
+
 # ----------------------------------------------------------------------
 # ruff
 # ----------------------------------------------------------------------
@@ -67,6 +75,7 @@ select = [
     "B",    # bugbear
     "C4",   # comprehensions
     "SIM",  # simplify
+    "BLE",  # blind-except
     "RUF",  # ruff-specific
 ]
 ignore = [
