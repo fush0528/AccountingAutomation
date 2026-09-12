@@ -178,12 +178,12 @@ def demo_models() -> None:
             lambda: MatchResult(
                 outcome=MatchOutcome.MATCHED,
                 stage=MatchStage.EXACT,
-                record=record,
+                records=(record,),
             ),
         ),
         (
             "MATCHED 卻沒說是哪一階段匹配的",
-            lambda: MatchResult(outcome=MatchOutcome.MATCHED, order=order, record=record),
+            lambda: MatchResult(outcome=MatchOutcome.MATCHED, order=order, records=(record,)),
         ),
         (
             "金額差異的 variance 卻是零",
@@ -191,7 +191,7 @@ def demo_models() -> None:
                 outcome=MatchOutcome.AMOUNT_VARIANCE,
                 stage=MatchStage.TOLERANT,
                 order=order,
-                record=record,
+                records=(record,),
                 variance=Money.zero(),
             ),
         ),
@@ -200,7 +200,7 @@ def demo_models() -> None:
             lambda: MatchResult(
                 outcome=MatchOutcome.MISSING_IN_LEDGER,
                 order=order,
-                record=record,
+                records=(record,),
             ),
         ),
     ]
@@ -295,7 +295,7 @@ def demo_matching_preview() -> None:
         if order is None:
             reason = "結算列沒有訂單編號" if key is None else "我方查無此訂單編號"
             print(f"    {rec.external_order_id or '(無編號)':<14} {reason}")
-            results.append(MatchResult(outcome=MatchOutcome.MISSING_IN_LEDGER, record=rec))
+            results.append(MatchResult(outcome=MatchOutcome.MISSING_IN_LEDGER, records=(rec,)))
             continue
 
         matched_orders.add(order.order_id)
@@ -308,7 +308,7 @@ def demo_matching_preview() -> None:
                     outcome=MatchOutcome.MATCHED,
                     stage=MatchStage.EXACT,
                     order=order,
-                    record=rec,
+                    records=(rec,),
                 )
             )
         else:
@@ -318,7 +318,7 @@ def demo_matching_preview() -> None:
                     outcome=MatchOutcome.AMOUNT_VARIANCE,
                     stage=MatchStage.TOLERANT,
                     order=order,
-                    record=rec,
+                    records=(rec,),
                     variance=variance,
                 )
             )

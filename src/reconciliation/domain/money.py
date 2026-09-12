@@ -150,6 +150,19 @@ class Money:
     def __repr__(self) -> str:
         return f"Money.from_str({str(self.to_decimal())!r}, {self.currency!r})"
 
+    def __format__(self, spec: str) -> str:
+        """支援 f-string 的格式化。
+
+        報表要對齊金額欄位，``f"{amount:>14}"`` 必須能用；偶爾也會需要
+        只取數值而不要幣別，``f"{amount:.2f}"`` 也該work。沒有這個方法的話
+        兩者都會拋 TypeError，而那個錯誤訊息完全看不出問題在哪。
+        """
+        if not spec:
+            return str(self)
+        if spec[-1] in "eEfFgGn%":
+            return format(self.to_decimal(), spec)
+        return format(str(self), spec)
+
     # ------------------------------------------------------------------
     # 算術
     # ------------------------------------------------------------------

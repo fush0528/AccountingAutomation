@@ -128,16 +128,36 @@ class TestMatchResult:
             outcome=MatchOutcome.MATCHED,
             stage=MatchStage.EXACT,
             order=make_order(),
-            record=make_record(),
+            records=(make_record(),),
         )
         assert not result.needs_review
+        assert result.record is result.records[0]
+
+    def test_one_order_can_have_several_records(self) -> None:
+        """同一筆訂單可能有一列銷售加一列退款。"""
+        sale = make_record()
+        refund = make_record(
+            record_type=SettlementRecordType.REFUND,
+            gross_amount=Money.from_str("-1000"),
+            fee_amount=Money.from_str("-55.30"),
+            net_amount=Money.from_str("-944.70"),
+        )
+        result = MatchResult(
+            outcome=MatchOutcome.MATCHED,
+            stage=MatchStage.EXACT,
+            order=make_order(),
+            records=(sale, refund),
+        )
+        assert len(result.records) == 2
+        assert result.record is sale  # record 是便利存取，取第一列
+        assert result.settled_amount == Money.zero()
 
     def test_matched_without_order_is_unconstructable(self) -> None:
         with pytest.raises(DomainError, match="必須同時具備"):
             MatchResult(
                 outcome=MatchOutcome.MATCHED,
                 stage=MatchStage.EXACT,
-                record=make_record(),
+                records=(make_record(),),
             )
 
     def test_matched_without_stage_is_unconstructable(self) -> None:
@@ -145,7 +165,7 @@ class TestMatchResult:
             MatchResult(
                 outcome=MatchOutcome.MATCHED,
                 order=make_order(),
-                record=make_record(),
+                records=(make_record(),),
             )
 
     def test_variance_must_be_non_zero(self) -> None:
@@ -154,7 +174,7 @@ class TestMatchResult:
                 outcome=MatchOutcome.AMOUNT_VARIANCE,
                 stage=MatchStage.TOLERANT,
                 order=make_order(),
-                record=make_record(),
+                records=(make_record(),),
                 variance=Money.zero(),
             )
 
@@ -163,7 +183,7 @@ class TestMatchResult:
             MatchResult(
                 outcome=MatchOutcome.MISSING_IN_LEDGER,
                 order=make_order(),
-                record=make_record(),
+                records=(make_record(),),
             )
 
     def test_missing_in_settlement_is_valid_with_order_only(self) -> None:
@@ -178,7 +198,7 @@ class TestMatchResult:
             outcome=MatchOutcome.MATCHED,
             stage=MatchStage.FUZZY,
             order=make_order(),
-            record=make_record(),
+            records=(make_record(),),
         )
         assert result.needs_review
 

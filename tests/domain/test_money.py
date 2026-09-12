@@ -203,6 +203,15 @@ class TestRepresentation:
     def test_str_includes_currency(self) -> None:
         assert str(Money.from_str("1234.5")) == "1234.50 TWD"
 
+    def test_format_supports_alignment(self) -> None:
+        """報表要對齊金額欄位。"""
+        assert f"{Money.from_str('12.5'):>12}" == "   12.50 TWD"
+        assert f"{Money.from_str('12.5'):<12}" == "12.50 TWD   "
+
+    def test_format_supports_numeric_spec(self) -> None:
+        """有時只要數值，不要幣別。"""
+        assert f"{Money.from_str('1234.5'):.2f}" == "1234.50"
+
     def test_repr_round_trips(self) -> None:
         m = Money.from_str("1234.56")
         assert eval(repr(m)) == m

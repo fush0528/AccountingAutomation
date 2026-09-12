@@ -219,6 +219,11 @@ class Candidate:
 class MatchResult:
     """一筆對帳結論。
 
+    ``records`` 是複數的，因為一筆訂單可能對應**多列**結算。最常見的情況
+    是同一個訂單編號出現一列銷售與一列退款：平台分兩次撥款，我方只有
+    一筆訂單。如果模型假設一對一，這種情況只能靠 parser 或 service 硬湊，
+    而那正是真實對帳系統最容易出錯的地方。
+
     這個型別的 ``__post_init__`` 是整個領域層最重要的地方：它讓
     「MATCHED 卻沒有 order」這種不可能的狀態根本無法被建構出來。
     與其在下游到處寫防禦性檢查，不如讓非法狀態不可表示。
@@ -227,25 +232,25 @@ class MatchResult:
     outcome: MatchOutcome
     stage: MatchStage | None = None
     order: Order | None = None
-    record: SettlementRecord | None = None
+    records: tuple[SettlementRecord, ...] = ()
     variance: Money | None = None
     variance_reason: VarianceReason | None = None
     candidates: tuple[Candidate, ...] = ()
 
     def __post_init__(self) -> None:
         if self.outcome in (MatchOutcome.MATCHED, MatchOutcome.AMOUNT_VARIANCE):
-            if self.order is None or self.record is None:
-                raise DomainError(f"{self.outcome.value} 必須同時具備 order 與 record")
+            if self.order is None or not self.records:
+                raise DomainError(f"{self.outcome.value} 必須同時具備 order 與 records")
             if self.stage is None:
                 raise DomainError(f"{self.outcome.value} 必須標明是在哪一階段匹配的")
         if self.outcome is MatchOutcome.MISSING_IN_LEDGER and (
-            self.record is None or self.order is not None
+            not self.records or self.order is not None
         ):
-            raise DomainError("missing_in_ledger 必須只有 record，沒有 order")
+            raise DomainError("missing_in_ledger 必須只有 records，沒有 order")
         if self.outcome is MatchOutcome.MISSING_IN_SETTLEMENT and (
-            self.order is None or self.record is not None
+            self.order is None or self.records
         ):
-            raise DomainError("missing_in_settlement 必須只有 order，沒有 record")
+            raise DomainError("missing_in_settlement 必須只有 order，沒有 records")
         if self.outcome is MatchOutcome.AMOUNT_VARIANCE and (
             self.variance is None or self.variance.is_zero
         ):
@@ -258,13 +263,28 @@ class MatchResult:
             raise DomainError("matched 的 variance 若存在必須為零")
 
     @property
+    def record(self) -> SettlementRecord | None:
+        """便利存取：大多數情況只有一列。"""
+        return self.records[0] if self.records else None
+
+    @property
+    def settled_amount(self) -> Money | None:
+        """平台實際撥了多少。多列時是加總——退款列是負數，會自動抵銷。"""
+        if not self.records:
+            return None
+        total = Money.zero(self.records[0].net_amount.currency)
+        for record in self.records:
+            total = total + record.net_amount
+        return total
+
+    @property
     def needs_review(self) -> bool:
-        """是否需要人工確認。"""
-        return self.stage is MatchStage.FUZZY or self.outcome in (
-            MatchOutcome.AMOUNT_VARIANCE,
-            MatchOutcome.MISSING_IN_LEDGER,
-            MatchOutcome.MISSING_IN_SETTLEMENT,
-        )
+        """是否需要人工確認。
+
+        只有 Stage 1 精確匹配可以完全自動放行。Stage 2 有金額差異要人看過，
+        Stage 3 是猜的更要人確認，三個「對不上」的象限當然也要。
+        """
+        return not (self.outcome is MatchOutcome.MATCHED and self.stage is MatchStage.EXACT)
 
 
 # ----------------------------------------------------------------------
