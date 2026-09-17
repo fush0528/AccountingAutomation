@@ -80,8 +80,15 @@ class TestConstruction:
             Money.from_decimal(1.5)  # type: ignore[arg-type]
 
     def test_bool_is_not_an_acceptable_minor_units(self) -> None:
+        """bool 是 int 的子類別，型別檢查放行，所以只能靠執行期擋。
+
+        這裡刻意不加 `# type: ignore`——mypy 認為 `Money(True)` 完全合法
+        （`bool` 就是 `int`），加了反而會被 `warn_unused_ignores` 判為多餘。
+        這一行的存在本身就是在說明：靜態型別擋不住這個，`__post_init__`
+        的執行期檢查不是多餘的防禦。
+        """
         with pytest.raises(MoneyError):
-            Money(True)  # type: ignore[arg-type]
+            Money(True)
 
     @pytest.mark.parametrize("text", ["", "   ", "-", "abc", "1.2.3"])
     def test_unparseable_strings_raise(self, text: str) -> None:

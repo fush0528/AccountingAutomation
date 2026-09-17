@@ -101,6 +101,7 @@ class ReconciliationMetrics:
     stage_exact: int
     stage_tolerant: int
     stage_fuzzy: int
+    needs_review: int
     elapsed_seconds: float
     candidate_comparisons: int
 
@@ -481,6 +482,7 @@ def _build_metrics(
         stage_exact=count_stage(MatchStage.EXACT),
         stage_tolerant=count_stage(MatchStage.TOLERANT),
         stage_fuzzy=count_stage(MatchStage.FUZZY),
+        needs_review=sum(1 for r in results if r.needs_review),
         elapsed_seconds=elapsed,
         candidate_comparisons=comparisons,
     )

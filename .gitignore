@@ -20,6 +20,16 @@ htmlcov/
 *.sqlite3
 data/generated/
 
+# 前端
+node_modules/
+frontend/dist/
+# build 產物不入版控——由 `cd frontend && npm run build` 重建。
+# 把編譯結果放進 git 會讓每次 build 都產生巨大的 diff，
+# 而且很快就會跟原始碼不同步。
+src/reconciliation/api/static/
+# 由後端匯出，給 openapi-typescript 讀的中繼檔
+openapi.json
+
 # 編輯器
 .vscode/
 .idea/

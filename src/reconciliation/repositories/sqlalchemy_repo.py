@@ -298,6 +298,7 @@ def _metrics_to_dict(metrics: ReconciliationMetrics) -> dict[str, object]:
         "stage_exact": metrics.stage_exact,
         "stage_tolerant": metrics.stage_tolerant,
         "stage_fuzzy": metrics.stage_fuzzy,
+        "needs_review": metrics.needs_review,
         "elapsed_seconds": metrics.elapsed_seconds,
         "candidate_comparisons": metrics.candidate_comparisons,
     }
@@ -315,6 +316,9 @@ def _metrics_from_dict(data: dict[str, object]) -> ReconciliationMetrics:
         stage_exact=int(str(data["stage_exact"])),
         stage_tolerant=int(str(data["stage_tolerant"])),
         stage_fuzzy=int(str(data["stage_fuzzy"])),
+        # 舊的報告沒有這個欄位，用 0 當預設值而不是讓整份報告讀不回來。
+        # 欄位增加是常見的，序列化的讀取端要能容忍。
+        needs_review=int(str(data.get("needs_review", 0))),
         elapsed_seconds=float(str(data["elapsed_seconds"])),
         candidate_comparisons=int(str(data["candidate_comparisons"])),
     )

@@ -18,10 +18,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Query, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..domain.matching import MatchingConfig
@@ -54,6 +56,11 @@ from .schemas import (
 __all__ = ["app", "create_app"]
 
 logger = logging.getLogger(__name__)
+
+#: 前端 build 的產物。由 ``frontend/`` 執行 ``npm run build`` 產生——
+#: vite.config.ts 直接把 outDir 指到這裡，省掉一個複製步驟。
+#: 目錄不存在時（還沒 build 過）API 照常運作，只是沒有網頁介面。
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -340,6 +347,41 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "settlement_records": SqlAlchemySettlementRepository(session).count(),
             "platforms": [code for code, _ in available_platforms()],
         }
+
+    # ------------------------------------------------------------------
+    # 前端（放在最後掛載）
+    # ------------------------------------------------------------------
+    if STATIC_DIR.is_dir():
+        assets = STATIC_DIR / "assets"
+        if assets.is_dir():
+            application.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+        @application.get("/", include_in_schema=False)
+        def index() -> FileResponse:
+            return FileResponse(STATIC_DIR / "index.html")
+
+        # response_model=None：回傳型別是兩種 Response 的聯集，
+        # FastAPI 會試著把它當成 Pydantic 模型去推導 schema 而失敗。
+        # 這個端點本來就不進 OpenAPI，直接關掉推導。
+        @application.get("/{path:path}", include_in_schema=False, response_model=None)
+        def spa_fallback(path: str) -> JSONResponse | FileResponse:
+            """把未知路徑交給前端處理。
+
+            這條 catch-all 必須是**最後**註冊的，否則會蓋掉所有 API 路由。
+            而且要明確排除 /api 開頭的路徑——不然打錯的 API 網址會回傳
+            一頁 HTML，前端拿到之後解析 JSON 失敗，錯誤訊息會完全誤導人。
+            寧可老實回 404。
+            """
+            if path.startswith("api/"):
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content=ErrorResponse(
+                        code="not_found", message=f"沒有這個端點：/{path}"
+                    ).model_dump(),
+                )
+            return FileResponse(STATIC_DIR / "index.html")
+
+        _ = (index, spa_fallback)
 
     # 讓型別檢查器知道這些端點有被使用
     _ = (

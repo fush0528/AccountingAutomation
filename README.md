@@ -3,9 +3,9 @@
 把電商賣家每月的手動對帳，從逐筆核對壓縮成一次上傳。
 核心是可插拔的帳單解析層與三階段匹配演算法。
 
-> **目前狀態：v0.5 — 開發中。**
-> 領域層、解析層、對帳引擎、持久層與 REST API 已完成並通過測試；
-> 前端（W5）與收尾（W6）進行中，進度見下方路線圖。
+> **目前狀態：v0.6 — 開發中。**
+> 領域層、解析層、對帳引擎、持久層、REST API 與 Web 介面已完成；
+> 收尾（W6：Excel 匯出、Docker、CI）進行中，進度見下方路線圖。
 > v1 的 CLI + Excel 版本保留在 [`legacy/`](legacy/)，作為演進的紀錄。
 
 ---
@@ -53,7 +53,11 @@ src/reconciliation/
 ├── parsers/         BaseSettlementParser ＋ 各平台實作 ＋ 註冊表
 ├── repositories/    介面 ＋ SQLAlchemy 實作
 ├── services/        使用案例編排，交易邊界
-└── api/             FastAPI routers，只處理 HTTP
+└── api/             FastAPI routers ＋ Pydantic DTO，只處理 HTTP
+
+frontend/
+├── src/api/         型別（自動產生）與 fetch 客戶端
+└── src/views/       三個畫面
 ```
 
 只有一條硬規則：**`domain/` 不 import 任何框架**。
@@ -220,19 +224,40 @@ python scripts/api_demo.py          # 走一次完整 HTTP 流程，含冪等性
 python scripts/walkthrough.py       # 領域層導覽，解釋每個元件在做什麼
 ```
 
-想自己用瀏覽器點：
+## Web 介面
 
 ```bash
+cd frontend && npm install && npm run build && cd ..
 python scripts/serve.py
-# 然後開 http://127.0.0.1:8000/docs
+# 開 http://127.0.0.1:8000
 ```
 
-`serve.py` 會先建立資料表、匯入我方訂單，再啟動伺服器。直接下
-`uvicorn reconciliation.api.app:app` 也可以（需先 `pip install -e .`），
-但資料庫裡沒有訂單的話，對帳結果會全部落在「漏記單」象限。
+三個畫面：**上傳**（拖放、平台自動偵測、冪等提示）、
+**總覽**（四象限與指標）、**明細**（依象限篩選、展開看候選理由）。
 
-**注意 `/docs` 不是本專案的前端。** 那是 FastAPI 依 OpenAPI 規格自動
-產生的互動式 API 文件，用來驗證與探索後端。真正的操作介面是 W5 的工作。
+API 文件在 `/docs`（FastAPI 依 OpenAPI 自動產生），開發時前端另外跑：
+
+```bash
+cd frontend && npm run dev      # http://localhost:5173，API 走 proxy 到 8000
+```
+
+### 前後端型別的單一真實來源
+
+前端**沒有一行手寫的 API 型別**。`src/api/schema.d.ts` 由
+`openapi-typescript` 從後端的 OpenAPI 文件產生：
+
+```bash
+make web-types        # 匯出 openapi.json 並重新產生 TypeScript 型別
+```
+
+後端 Pydantic schema 上的中文欄位說明會一路帶到 TypeScript，
+變成編輯器的提示。而如果後端改了欄位名稱，`npm run typecheck`
+會在**編譯期**指出前端哪幾行壞了，不是等使用者看到 undefined。
+
+這在開發過程中真的抓到東西：我在前端寫了 `metrics.total_needs_review`，
+型別檢查立刻報錯說這個欄位不存在。正確的修法是去後端把 `needs_review`
+加進 `MetricsOut`——而不是在前端自己拿別的欄位湊出一個數字。
+前端重算業務邏輯，是前後端開始不一致的起點。
 
 完整的資料流是：上傳 → parser 自動偵測 → 統一的領域模型 → 冪等寫入資料庫
 → 三階段匹配 → 四象限報告。
@@ -255,13 +280,32 @@ make check               # 三者一起跑，提交前用這個
 - [x] **W2 解析層** — 抽象 parser、三個平台實作、合成資料產生器
 - [x] **W3 對帳引擎** — 三階段匹配、差異歸因、四象限報告、property-based test
 - [x] **W4 API** — FastAPI、持久層、檔案上傳、冪等匯入、OpenAPI
-- [ ] **W5 前端** — React ＋ TypeScript，型別由 OpenAPI schema 產生
+- [x] **W5 前端** — React ＋ TypeScript，型別由 OpenAPI schema 產生
 - [ ] **W6 收尾** — Excel 匯出、Docker Compose、CI、完整文件
 
 ## 關於資料
 
-本專案使用**合成資料**。作者手上沒有真實的平台結算單，
-因此 `scripts/gen_fixtures.py` 依據公開的結算單欄位結構產生測試資料。
+本專案使用**合成資料**。作者手上沒有真實的結算單，所有金額與編號都是
+產生的。但**欄位規格有出處**——三個平台各自對應現實中一種不同來源的
+對帳檔，不是三個長得差不多的假平台：
+
+| | 現實中誰給的 | 格式 | 主要難點 |
+|---|---|---|---|
+| 平台 A | 第三方金流商的撥款對帳檔 | UTF-8／Big5 CSV | 手續費拆三個科目要相加；退款是銷售列上的欄位；檔案自帶淨額欄可交叉驗證 |
+| 平台 B | 電商平台賣家後台匯出的報表 | Excel | 報表標題 ＋ 兩層表頭 ＋ 合併儲存格，表頭列號要用找的 |
+| 平台 C | 舊 ERP／供應商對帳單 | Big5 CSV | 民國年；千分位金額是字串；退貨列印正數 |
+
+平台 A 的欄位取自綠界科技公開的
+[撥款對帳檔](https://developers.ecpay.com.tw/?p=16415)與
+[對帳檔 V2](https://developers.ecpay.com.tw/?p=2896) 規格
+（欄位名稱已改為通用詞，避免被誤認為真實的金流對帳檔）。
+完整的出處說明與限制見
+[ADR 0005](docs/adr/0005-sample-data-provenance.md)。
+
+**最值得看的一點：退款在平台 A 是銷售列上的一個欄位，在平台 C 是獨立的
+一列。** 同一件商業事實、兩種表示法——parser 把它們都收斂成「一筆銷售
+記錄 ＋ 一筆退款記錄」，所以下游的歸因邏輯完全不需要知道資料來自哪裡。
+這才是 parser 抽象真正在吸收的差異；副檔名不同只是表面。
 
 但合成不等於乾淨。產生器會刻意注入真實情境會出現的狀況，
 每一種都對應對帳引擎必須處理的一個問題：
@@ -282,3 +326,12 @@ make check               # 三者一起跑，提交前用這個
 
 所有資料由亂數種子決定，同一個種子永遠產生同一份資料，因此測試可重現。
 這一點在此明確說明，不做任何有真實資料的暗示。
+
+**這個數字該怎麼讀。** 欄位規格有出處，但**資料分佈是猜的**——空白編號
+6%、金額差異 7%、部分退款 4% 這些比例沒有真實依據。所以 79.6% 的正確讀法是
+「在這個假設的分佈下，引擎的行為與 ground truth 相符」，
+**不是**「本系統在真實環境可達 79.6%」。
+
+另外還有一組 12 筆的小樣本（`python scripts/gen_samples.py`），
+每一種對帳情況恰好出現一次，用來逐列講解。那一組刻意塞滿例外，
+自動化率只有 28.6%——**那個數字不能拿來當效能指標**，兩組資料的用途不同。

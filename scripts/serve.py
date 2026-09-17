@@ -50,13 +50,17 @@ from reconciliation.repositories.sqlalchemy_repo import (  # noqa: E402
 DEFAULT_DB = f"sqlite:///{ROOT / 'reconciliation.db'}"
 
 
-def seed_orders(app: object) -> tuple[int, int]:
+def seed_orders(app: object, orders_csv: Path | None = None) -> tuple[int, int]:
     """把我方訂單寫進資料庫。
 
     回傳 ``(本次新增, 目前總數)``。重複執行是安全的——
     repository 會跳過已存在的 order_id。
+
+    訂單來源可以換：``data/generated/orders.csv`` 是統計用的大批資料，
+    ``data/samples/orders.csv`` 是逐列講解用的小樣本。兩邊的訂單編號
+    不重疊，所以同時匯入也不會互相污染。
     """
-    orders_csv = DATA_DIR / "orders.csv"
+    orders_csv = orders_csv or DATA_DIR / "orders.csv"
     if not orders_csv.exists():
         return 0, 0
 
@@ -87,7 +91,26 @@ def main() -> int:
     parser.add_argument("--database-url", default=DEFAULT_DB)
     parser.add_argument("--fresh", action="store_true", help="先刪掉現有的 SQLite 檔案再啟動")
     parser.add_argument("--no-seed", action="store_true", help="不要自動匯入訂單")
+    parser.add_argument(
+        "--samples",
+        action="store_true",
+        help="改用 data/samples/orders.csv 的 12 筆小樣本訂單（搭配 data/samples 裡的結算單）",
+    )
+    parser.add_argument(
+        "--orders",
+        type=Path,
+        default=None,
+        help="指定訂單 CSV 的路徑（覆蓋 --samples）",
+    )
     args = parser.parse_args()
+
+    orders_csv = args.orders or (
+        ROOT / "data" / "samples" / "orders.csv" if args.samples else None
+    )
+    if orders_csv is not None and not orders_csv.exists():
+        print(f"找不到訂單檔 {orders_csv}")
+        print("先執行 python scripts/gen_samples.py（或 gen_fixtures.py）產生資料。")
+        return 1
 
     if args.fresh and args.database_url.startswith("sqlite:///"):
         db_file = Path(args.database_url.removeprefix("sqlite:///"))
@@ -105,7 +128,7 @@ def main() -> int:
     print(f"\n  資料庫　{args.database_url}")
 
     if not args.no_seed:
-        added, total = seed_orders(app)
+        added, total = seed_orders(app, orders_csv)
         if total == 0:
             print("\n  ⚠ 資料庫裡沒有我方訂單。")
             print("    先執行 python scripts/gen_fixtures.py 產生測試資料，")
@@ -118,7 +141,7 @@ def main() -> int:
     print(f"  結算列　{records} 筆")
     if records == 0:
         print("\n  還沒有結算單。等一下在網頁上用 POST /api/imports 上傳，")
-        print(f"  檔案在 {DATA_DIR}")
+        print(f"  檔案在 {orders_csv.parent if orders_csv else DATA_DIR}")
 
     print()
     print("─" * 74)

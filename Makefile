@@ -27,8 +27,22 @@ fmt:
 
 check: lint type test
 
+# 前端
+openapi:
+	python -c "import sys,json;sys.path.insert(0,'src');from reconciliation.api import create_app;print(json.dumps(create_app('sqlite:///:memory:').openapi(),ensure_ascii=False,indent=2))" > openapi.json
+
+web-types: openapi
+	cd frontend && npm run gen:api
+
+web-build: web-types
+	cd frontend && npm run build
+
+web-dev:
+	cd frontend && npm run dev
+
 cov:
 	pytest --cov --cov-report=term-missing --cov-report=html
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage
+	find . -type d -name __pycache__ -not -path "./.git/*" -exec rm -rf {} +

@@ -40,6 +40,7 @@ import csv
 import json
 import random
 import sys
+import zlib
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -289,36 +290,83 @@ def write_orders_csv(path: Path, orders: list[Order]) -> None:
             )
 
 
+#: 三個扣款科目的拆分比例，合計 100。實際金額用 Money.allocate 依最大
+#: 餘數法分配，分不盡的最小單位落在第一個科目而不是憑空消失。
+FEE_SPLIT = (55, 35, 10)
+PLATFORM_A_HEADER = (
+    "交易日期",
+    "廠商訂單編號",
+    "金流交易編號",
+    "付款方式",
+    "手續費率",
+    "商品名稱",
+    "交易金額",
+    "金流手續費",
+    "平台手續費",
+    "金流處理費",
+    "退款日期",
+    "退款金額",
+    "應收款項(淨額)",
+    "結算日期",
+    "撥款日期",
+)
+
+
 def write_platform_a(path: Path, rows: list[Row]) -> None:
-    """UTF-8 CSV，單層表頭，西元日期。"""
-    labels = {"sale": "銷售", "refund": "退款", "adjustment": "調整"}
+    """金流商的撥款對帳檔：手續費拆三欄，退款併回銷售列。
+
+    產生器內部統一用「銷售一列、退款一列」表示（跟平台 C 一致），
+    這裡才壓縮成這個平台的表示法。parser 做的是反向的同一件事，
+    兩邊合起來就是一組來回轉換的證明。
+    """
+    merged: list[tuple[Row, Row | None]] = []
+    for row in rows:
+        if row.kind == "refund":
+            for index in range(len(merged) - 1, -1, -1):
+                sale, existing = merged[index]
+                if sale.external_order_id == row.external_order_id and existing is None:
+                    merged[index] = (sale, row)
+                    break
+            else:
+                merged.append((row, None))  # 沒有對應銷售列的孤兒退款，照原樣寫
+        else:
+            merged.append((row, None))
+
     with path.open("w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(
-            [
-                "訂單編號",
-                "訂單成立日",
-                "商品名稱",
-                "數量",
-                "訂單金額",
-                "平台手續費",
-                "撥款金額",
-                "結算日期",
-                "交易類型",
-            ]
-        )
-        for r in rows:
+        writer.writerow(PLATFORM_A_HEADER)
+        for sale, refund in merged:
+            # 退款會連手續費一起退，所以併回來的是「淨手續費」
+            fee = sale.fee + (refund.fee if refund else Money.zero(sale.fee.currency))
+            gateway_fee, platform_fee, handling_fee = fee.allocate(FEE_SPLIT)
+            refund_amount = -refund.gross if refund else Money.zero(sale.gross.currency)
+            rate = (
+                (fee.to_decimal() / sale.gross.to_decimal() * 100).quantize(
+                    Decimal("0.01")
+                )
+                if not sale.gross.is_zero
+                else Decimal("0.00")
+            )
             writer.writerow(
                 [
-                    r.external_order_id,
-                    (r.settled_at - timedelta(days=14)).isoformat(),
-                    r.product_name,
-                    r.quantity,
-                    r.gross.to_decimal(),
-                    r.fee.to_decimal(),
-                    r.net.to_decimal(),
-                    r.settled_at.isoformat(),
-                    labels[r.kind],
+                    (sale.settled_at - timedelta(days=14)).isoformat(),
+                    sale.external_order_id,
+                    # 由內容推導而非列序，重複匯出的兩列才會真的一模一樣。
+                    # 不用內建 hash()：它每個 process 都不同，檔案就不固定了。
+                    f"EC{sale.settled_at:%Y%m%d}"
+                    f"{zlib.crc32(sale.external_order_id.encode()) % 100000:05d}",
+                    "信用卡",
+                    f"{rate}%",
+                    sale.product_name,
+                    sale.gross.to_decimal(),
+                    gateway_fee.to_decimal(),
+                    platform_fee.to_decimal(),
+                    handling_fee.to_decimal(),
+                    refund.settled_at.isoformat() if refund else "",
+                    refund_amount.to_decimal(),
+                    (sale.gross - fee - refund_amount).to_decimal(),
+                    (sale.settled_at - timedelta(days=2)).isoformat(),
+                    sale.settled_at.isoformat(),
                 ]
             )
 

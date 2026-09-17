@@ -218,13 +218,17 @@ class MatchResultOut(BaseModel):
     stage: int | None = Field(default=None, description="1 精確、2 容差、3 模糊；未匹配時為 null")
     needs_review: bool = Field(description="是否需要人工確認。只有 Stage 1 的 matched 為 false")
     order: OrderOut | None = None
-    records: list[SettlementRecordOut] = Field(default_factory=list)
+    # 這兩個刻意不給預設值。有預設值的 Pydantic 欄位在 OpenAPI 裡是
+    # optional，產生出來的 TypeScript 型別就會是 `T[] | undefined`，
+    # 逼前端去處理一個實際上不可能發生的狀態。`of()` 永遠會給值，
+    # 那就讓型別誠實地說出來。
+    records: list[SettlementRecordOut]
     settled_amount: MoneyOut | None = Field(
         default=None, description="平台實際撥款合計（多列時已抵銷退款）"
     )
     variance: MoneyOut | None = None
     variance_reason: str | None = None
-    candidates: list[CandidateOut] = Field(default_factory=list)
+    candidates: list[CandidateOut]
 
     @classmethod
     def of(cls, result: MatchResult) -> MatchResultOut:
@@ -261,6 +265,7 @@ class MetricsOut(BaseModel):
     stage_exact: int
     stage_tolerant: int
     stage_fuzzy: int
+    needs_review: int = Field(description="需人工確認的筆數。只有 Stage 1 的 matched 不需要")
     automation_rate: float = Field(
         description="完全不需人工介入的比例。只計 Stage 1——那是唯一可以直接入帳的情況"
     )
@@ -283,6 +288,7 @@ class MetricsOut(BaseModel):
             stage_exact=metrics.stage_exact,
             stage_tolerant=metrics.stage_tolerant,
             stage_fuzzy=metrics.stage_fuzzy,
+            needs_review=metrics.needs_review,
             automation_rate=metrics.automation_rate,
             review_rate=metrics.review_rate,
             elapsed_seconds=metrics.elapsed_seconds,

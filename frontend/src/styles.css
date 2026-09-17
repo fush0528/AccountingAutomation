@@ -1,0 +1,554 @@
+/*
+ * 設計 token。
+ *
+ * 顏色分成兩組，用途完全不同，不可混用：
+ *
+ * 1. **介面色**（--page / --surface / --ink / --accent…）——版面的骨架。
+ *    深淺兩色系各自定義，不是把淺色反轉。
+ *
+ * 2. **狀態色**（--good / --warning / --serious / --critical）——
+ *    四象限的語意。這四個值**兩種模式共用**，因為狀態色代表的是
+ *    「事情的嚴重程度」，不該隨主題改變意思。
+ *
+ * 狀態色只當作色塊與小圓點使用，**數字與文字一律用 ink token**。
+ * 原因是 warning（#fab219）與 serious（#ec835a）在白底上的對比低於 3:1，
+ * 拿來寫字會看不清楚。它們永遠伴隨可見的名稱與數字出現，
+ * 所以資訊不會只靠顏色傳達——這是刻意的取捨，不是疏忽。
+ */
+
+:root {
+  --page: #f4f7f8;
+  --surface: #ffffff;
+  --surface-2: #eef3f4;
+  --line: #dce5e7;
+  --line-strong: #bccbcf;
+  --ink: #101a1e;
+  --ink-2: #3d4e54;
+  --muted: #667b81;
+  --accent: #14606e;
+  --accent-soft: #e0eff1;
+
+  /* 狀態色：兩種模式共用 */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --radius: 6px;
+  --shadow: 0 1px 2px rgba(16, 26, 30, 0.05), 0 8px 24px -18px rgba(16, 26, 30, 0.3);
+
+  --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans TC",
+    "Microsoft JhengHei", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0b1316;
+    --surface: #131e22;
+    --surface-2: #18262b;
+    --line: #22343a;
+    --line-strong: #32484f;
+    --ink: #dfe9eb;
+    --ink-2: #b2c3c7;
+    --muted: #82989f;
+    --accent: #5cb6c4;
+    --accent-soft: #11333a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -18px rgba(0, 0, 0, 0.8);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --page: #0b1316;
+  --surface: #131e22;
+  --surface-2: #18262b;
+  --line: #22343a;
+  --line-strong: #32484f;
+  --ink: #dfe9eb;
+  --ink-2: #b2c3c7;
+  --muted: #82989f;
+  --accent: #5cb6c4;
+  --accent-soft: #11333a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -18px rgba(0, 0, 0, 0.8);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  text-wrap: balance;
+}
+h1 {
+  font-size: 1.35rem;
+}
+h2 {
+  font-size: 1.1rem;
+}
+h3 {
+  font-size: 0.95rem;
+}
+p {
+  margin: 0;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- */
+.app {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px 80px;
+}
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  padding: 28px 0 16px;
+}
+.masthead .sub {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.masthead .spacer {
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 28px;
+}
+.tabs button {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 0.93rem;
+  color: var(--muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.tabs button:hover {
+  color: var(--ink);
+}
+.tabs button[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+.tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+}
+.card + .card {
+  margin-top: 16px;
+}
+.card > h2 {
+  margin-bottom: 4px;
+}
+.card .hint {
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin-bottom: 16px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+button.primary,
+button.ghost {
+  appearance: none;
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s;
+}
+button.primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--surface);
+  font-weight: 500;
+}
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+button.ghost {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+button.ghost[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+select,
+input[type="text"] {
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- */
+/* 上傳區 */
+.dropzone {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  padding: 40px 24px;
+  text-align: center;
+  background: var(--surface-2);
+  transition: border-color 0.15s, background 0.15s;
+}
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone .big {
+  font-size: 1rem;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.dropzone .small {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.result-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+.result.dup {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.result.err {
+  border-color: var(--critical);
+}
+.result .name {
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  color: var(--ink-2);
+}
+.result .msg {
+  color: var(--ink);
+}
+.result .tag {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+  align-self: start;
+  margin-top: 2px;
+  border: 1px solid currentColor;
+}
+
+/* ---------------------------------------------------------------- */
+/* 指標磚 */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tile {
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.tile .label {
+  font-size: 0.76rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.tile .value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.tile .note {
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* 四象限長條 */
+.quadrants {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.quadrant {
+  display: grid;
+  grid-template-columns: 1.05rem minmax(9rem, auto) 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+.quadrant .dot {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+  justify-self: center;
+}
+.quadrant .name {
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.quadrant .track {
+  /* track 與 fill 都是 <span>，而 width / height 對 inline 元素無效。
+     track 因為是 grid item 會被自動 blockify，fill 不是——所以它必須
+     自己宣告 display:block，否則長條永遠是空的。 */
+  display: block;
+  height: 10px;
+  background: var(--surface-2);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.quadrant .fill {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  min-width: 2px;
+  transition: width 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.quadrant .count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  color: var(--ink);
+  min-width: 5.5rem;
+  text-align: right;
+}
+.quadrant .count .pct {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-left: 6px;
+}
+
+/* ---------------------------------------------------------------- */
+/* 表格 */
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+thead th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  vertical-align: top;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr.clickable {
+  cursor: pointer;
+}
+tbody tr.clickable:hover td {
+  background: var(--surface-2);
+}
+td.right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+td.detail {
+  background: var(--surface-2);
+  padding: 14px 18px;
+  font-size: 0.85rem;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 1px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.badge.stage1 {
+  border-color: var(--good);
+  color: var(--good);
+}
+.badge.stage2 {
+  border-color: var(--warning);
+  color: var(--ink-2);
+}
+.badge.stage3 {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.candidate {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--line-strong);
+}
+.candidate:first-of-type {
+  border-top: none;
+}
+.candidate .score {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+.candidate .reasons {
+  color: var(--ink-2);
+}
+
+/* ---------------------------------------------------------------- */
+.empty,
+.loading,
+.error {
+  padding: 34px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+.error {
+  color: var(--critical);
+}
+.error .hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 6px;
+}
+
+.note-strip {
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+
+footer {
+  margin-top: 32px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 680px) {
+  .app {
+    padding: 0 16px 60px;
+  }
+  .quadrant {
+    grid-template-columns: 1.05rem 1fr auto;
+  }
+  .quadrant .track {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
