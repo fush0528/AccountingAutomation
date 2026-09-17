@@ -3,9 +3,9 @@
 把電商賣家每月的手動對帳，從逐筆核對壓縮成一次上傳。
 核心是可插拔的帳單解析層與三階段匹配演算法。
 
-> **目前狀態：v0.4 — 開發中。**
-> 領域層、解析層與對帳引擎已完成並通過測試；
-> API 與前端依序開發中，進度見下方路線圖。
+> **目前狀態：v0.5 — 開發中。**
+> 領域層、解析層、對帳引擎、持久層與 REST API 已完成並通過測試；
+> 前端（W5）與收尾（W6）進行中，進度見下方路線圖。
 > v1 的 CLI + Excel 版本保留在 [`legacy/`](legacy/)，作為演進的紀錄。
 
 ---
@@ -61,7 +61,23 @@ src/reconciliation/
 因此領域層的測試不需要資料庫，跑完一輪不到 0.2 秒。
 
 `repositories/` 這一層存在的唯一理由，是讓 SQLite 換成 PostgreSQL
-只需要改連線字串——因為沒有任何一行原生 SQL。
+只需要改連線字串。這句話**已經被驗證過**，不是宣稱：
+
+```bash
+# 預設：記憶體 SQLite，不需要任何外部服務
+python -m pytest tests/api                      # 24 passed
+
+# 同一份測試，指向真的 PostgreSQL 16
+RECONCILIATION_TEST_DATABASE_URL="postgresql+psycopg://user@host/db" \
+    python -m pytest tests/api                  # 24 passed
+```
+
+同一份 Alembic migration 在兩種資料庫上都跑得過（`alembic check` 兩邊都
+回報無差異），對帳結果完全一致——自動化率同樣是 79.6%。
+
+能做到這件事的前提有三個，缺一不可：沒有任何一行原生 SQL；
+沒有用資料庫特有的型別（沒有 `JSONB`、沒有 `ARRAY`、沒有 `SERIAL`）；
+Alembic 在 SQLite 上啟用 batch 模式繞過它不支援的 `ALTER TABLE`。
 
 ## 幾個刻意的設計決策
 
@@ -92,6 +108,14 @@ src/reconciliation/
 **測試不只驗案例，還驗性質。** `tests/domain/test_properties.py` 用 Hypothesis
 產生隨機輸入，驗證四條無論如何都必須成立的不變量：資料守恆、不重複認領、
 金額一致、狀態合法。挑案例只能證明想到的情況是對的。
+
+**DTO 不等於領域模型。** `api/schemas.py` 是獨立的一層。`Money` 內部存
+整數分是為了算術正確，但 API 回傳 `{"amount": "944.70", "currency": "TWD"}`
+對前端才友善。讓領域模型直接序列化，遲早會有人為了讓 JSON 好看去改 `Money`。
+
+**API 的金額一律是字串。** JSON 的 number 是 IEEE 754 雙精度浮點數，
+`944.70` 放進去再拿出來不保證還是 `944.70`。整個專案花了這麼多力氣
+避開浮點數，不該在最後一哩前功盡棄。
 
 ## 成果
 
@@ -140,21 +164,78 @@ src/reconciliation/
 要壓回接近線性，桶寬必須隨資料量縮小。這是目前設計的已知限制，
 寫在這裡而不是假裝它是線性的。
 
-## 跑起來看看
+## API
 
-目前還沒有 CLI 與 API（W4、W5 的工作），但整條處理鏈已經可以實際運作：
+```
+POST   /api/imports                            上傳結算單（平台自動偵測、冪等）
+GET    /api/imports                            列出匯入批次
+GET    /api/imports/{batch_id}                 批次明細
+POST   /api/reconciliations                    執行一次對帳
+GET    /api/reconciliations/{run_id}/report    四象限報告（可依象限篩選、分頁）
+GET    /api/orders                             我方訂單
+GET    /api/platforms                          已支援的平台（讀 parser registry）
+GET    /api/health                             健康檢查
+```
+
+啟動後在 `/docs` 有自動產生的 OpenAPI 文件。W5 的前端會用
+`openapi-typescript` 從那份文件產生 TypeScript 型別，做到前後端型別的
+單一真實來源。
+
+### 冪等匯入
+
+同一份帳單被匯入兩次，對帳結果會完全錯亂——金額翻倍、假的重複交易。
+上傳又是最容易被重複觸發的操作：使用者點兩次、逾時後重試、前端沒防連擊。
+
+所以有三道互相獨立的防線：
+
+| 防線 | 機制 | 擋得住什麼 |
+|---|---|---|
+| 1 | 檔案內容 SHA-256 ＋ 唯一約束 | 同一份檔案再上傳（改檔名也沒用） |
+| 2 | 每列 fingerprint ＋ 唯一約束 | 檔案改過一個字，但裡面的列重複 |
+| 3 | 整批包在單一交易 | 中途失敗留下半批資料 |
+
+第二道的存在是因為很實際的情境：平台重新匯出一份帳單，多了一列新交易，
+其餘完全相同。整份檔案的指紋因此不同，但舊的那幾列不該重複入帳。
+實測結果是 `accepted_count: 1, skipped_duplicate_rows: 4`。
+
+`tests/api/test_api.py::TestIdempotency` 有六個測試守著這件事，
+包含「連續上傳五次等於上傳一次」。
+
+**為什麼不是「先查有沒有、沒有再寫」**：那在併發下會失效——
+兩個請求可能同時查到「沒有」。唯一約束是資料庫保證的真正不變量，
+應用層該做的是處理被拒絕的情況，而不是試圖預先避免它。
+這就是分散式系統說的「至少一次投遞下的恰好一次語意」。
+
+## 跑起來看看
 
 ```bash
 pip install -e ".[dev]"
+alembic upgrade head                # 建立資料表
 
-python scripts/gen_fixtures.py     # 產生三個平台的合成結算單
-python scripts/parse_demo.py       # 讓 registry 自己認平台並解析
-python scripts/reconcile_demo.py   # 三階段對帳，輸出四象限報告
-python scripts/benchmark.py        # 拿 ground truth 驗證上面的數字
-python scripts/walkthrough.py      # 領域層導覽，解釋每個元件在做什麼
+python scripts/gen_fixtures.py      # 產生三個平台的合成結算單
+python scripts/parse_demo.py        # 讓 registry 自己認平台並解析
+python scripts/reconcile_demo.py    # 三階段對帳，輸出四象限報告
+python scripts/benchmark.py         # 拿 ground truth 驗證上面的數字
+python scripts/api_demo.py          # 走一次完整 HTTP 流程，含冪等性實測
+python scripts/walkthrough.py       # 領域層導覽，解釋每個元件在做什麼
 ```
 
-完整的資料流是：合成資料 → 三個 parser → 統一的領域模型 → 三階段匹配 → 四象限報告。
+想自己用瀏覽器點：
+
+```bash
+python scripts/serve.py
+# 然後開 http://127.0.0.1:8000/docs
+```
+
+`serve.py` 會先建立資料表、匯入我方訂單，再啟動伺服器。直接下
+`uvicorn reconciliation.api.app:app` 也可以（需先 `pip install -e .`），
+但資料庫裡沒有訂單的話，對帳結果會全部落在「漏記單」象限。
+
+**注意 `/docs` 不是本專案的前端。** 那是 FastAPI 依 OpenAPI 規格自動
+產生的互動式 API 文件，用來驗證與探索後端。真正的操作介面是 W5 的工作。
+
+完整的資料流是：上傳 → parser 自動偵測 → 統一的領域模型 → 冪等寫入資料庫
+→ 三階段匹配 → 四象限報告。
 
 ## 開發
 
@@ -173,7 +254,7 @@ make check               # 三者一起跑，提交前用這個
 - [x] **W1 地基** — 分層結構、`Money` 值物件、領域模型、正規化、測試骨架
 - [x] **W2 解析層** — 抽象 parser、三個平台實作、合成資料產生器
 - [x] **W3 對帳引擎** — 三階段匹配、差異歸因、四象限報告、property-based test
-- [ ] **W4 API** — FastAPI、檔案上傳、冪等匯入、OpenAPI
+- [x] **W4 API** — FastAPI、持久層、檔案上傳、冪等匯入、OpenAPI
 - [ ] **W5 前端** — React ＋ TypeScript，型別由 OpenAPI schema 產生
 - [ ] **W6 收尾** — Excel 匯出、Docker Compose、CI、完整文件
 
