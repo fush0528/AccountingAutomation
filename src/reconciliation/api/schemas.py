@@ -272,7 +272,16 @@ class MetricsOut(BaseModel):
     review_rate: float
     elapsed_seconds: float
     candidate_comparisons: int = Field(
-        description="Stage 3 實際的候選比對次數。與 order_count × record_count 相比可看出索引的效果"
+        description="Stage 3 建了候選索引之後，實際做了幾次評分比對"
+    )
+    fuzzy_record_count: int = Field(
+        description="有幾列結算資料進到 Stage 3（前兩階段靠編號配不掉的）"
+    )
+    naive_comparisons: int = Field(
+        description=(
+            "同樣的工作不建索引要做幾次比對（進入 Stage 3 的結算列 × 尚未被認領的訂單）。"
+            "不是全部結算列 × 全部訂單——那會把索引的功勞誇大一個數量級"
+        )
     )
 
     @classmethod
@@ -293,6 +302,8 @@ class MetricsOut(BaseModel):
             review_rate=metrics.review_rate,
             elapsed_seconds=metrics.elapsed_seconds,
             candidate_comparisons=metrics.candidate_comparisons,
+            fuzzy_record_count=metrics.fuzzy_record_count,
+            naive_comparisons=metrics.naive_comparisons,
         )
 
 

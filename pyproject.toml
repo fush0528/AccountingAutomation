@@ -27,6 +27,9 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.5",
 ]
+# 只有在要把測試指向真的 PostgreSQL 時才需要。分成獨立的 extra 是刻意的：
+# 預設的開發流程完全不需要 PostgreSQL，`pip install -e ".[dev]"` 就能跑全部測試。
+postgres = ["psycopg[binary]>=3.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -38,7 +41,35 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q --strict-markers --doctest-modules --doctest-glob=''"
-filterwarnings = ["error"]
+
+# 警告一律當成錯誤。這是刻意的——棄用警告是未來的 bug，
+# 讓它現在就吵，比等到某天真的被移除才爆炸好。
+#
+# 例外必須逐條寫清楚，而且只比對訊息、不指定類別：指定類別的話，
+# pytest 要 import 那個類別才能建立過濾器，而該類別在舊版 starlette
+# 裡並不存在，會讓設定本身在舊環境壞掉。
+filterwarnings = [
+    "error",
+
+    # --- 例外：第三方在 import 時就發出的遷移公告 ---------------------
+    #
+    # 下面兩條都是 `import starlette.testclient` 的當下就觸發的，
+    # 而不是本專案呼叫了什麼過時的 API。它們有三個共同點：
+    #   1. 發生在 import 階段，所以會讓整個 tests/api 在**收集**時就失敗，
+    #      一個測試都還沒跑
+    #   2. 我們無法在自己的程式裡修正——要等 FastAPI 上游跟進
+    #   3. 純屬公告性質，沒有實際的行為風險
+    #
+    # 兩條都只比對訊息、不指定警告類別：指定類別的話 pytest 必須
+    # import 那個類別才能建立過濾器，而 `StarletteDeprecationWarning`
+    # 在舊版 starlette 裡並不存在，會讓設定本身在舊環境壞掉。
+    # （實測過 starlette 1.0.0 與 1.6.0 兩種版本都通過。）
+    #
+    # 上游遷移完成後這兩條就該刪掉。刪掉之後測試若仍然通過，
+    # 就代表問題真的沒了。
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:",
+]
 
 # ----------------------------------------------------------------------
 # mypy —— 領域層要求最嚴，因為那裡是正確性的核心

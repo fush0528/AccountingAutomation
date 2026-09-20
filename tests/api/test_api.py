@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
@@ -37,10 +39,15 @@ SETTLEMENT_CSV = "\n".join(
 def upload(
     client: TestClient, content: str = SETTLEMENT_CSV, name: str = "a.csv"
 ) -> httpx.Response:
-    return client.post(
+    # 先指派給有型別註記的區域變數再回傳，不直接 `return client.post(...)`。
+    # 某些版本的 starlette 把 TestClient.post 的回傳標成 Any，而 mypy 在
+    # strict（warn_return_any）下會拒絕「宣告回傳 Response 卻回傳 Any」。
+    # 這行指派讓 Any 在這裡就收斂成 Response，兩種版本都通過。
+    response: httpx.Response = client.post(
         "/api/imports",
         files={"file": (name, content.encode("utf-8"), "text/csv")},
     )
+    return response
 
 
 # ----------------------------------------------------------------------
@@ -268,16 +275,39 @@ class TestOrders:
         assert seeded_client.get("/api/orders?platform=platform_z").json() == []
 
 
+@contextmanager
+def disposing_app(url: str) -> Iterator[TestClient]:
+    """建一個 app、用完把連線池關掉。
+
+    不關會怎樣：SQLAlchemy 的連線池握著 DBAPI 連線，engine 被垃圾回收時
+    那些連線才跟著關。Python 3.13 起 ``sqlite3.Connection`` 在未關閉就被
+    回收時會發出 ``ResourceWarning``，而本專案把警告視為錯誤——於是失敗會
+    出現在「剛好觸發 GC 的那個測試」上，跟真正洩漏的地方毫無關係。
+    （實際症狀就是這樣：報錯報在 test_properties.py 與架構測試上。）
+
+    所以清理要明確做，不能靠回收時機。
+    """
+    app = create_app(url)
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.state.engine.dispose()
+
+
 class TestPersistence:
     def test_data_survives_a_new_app_instance(self, tmp_path: Path) -> None:
         """換一個 app 實例，資料還在——證明真的寫進磁碟了。"""
         url = f"sqlite:///{tmp_path / 'test.db'}"
         engine = create_db_engine(url)
-        init_schema(engine)
+        try:
+            init_schema(engine)
+        finally:
+            engine.dispose()
 
-        with TestClient(create_app(url)) as first:
+        with disposing_app(url) as first:
             batch_id = upload(first).json()["batch_id"]
 
-        with TestClient(create_app(url)) as second:
+        with disposing_app(url) as second:
             assert second.get(f"/api/imports/{batch_id}").status_code == 200
             assert second.get("/api/health").json()["settlement_records"] == 4

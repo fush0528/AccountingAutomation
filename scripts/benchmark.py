@@ -35,7 +35,6 @@ from reconciliation.domain import (
     MatchStage,
     Order,
     ReconciliationReport,
-    SettlementRecord,
     normalize_order_id,
     reconcile,
 )
@@ -177,22 +176,32 @@ def verify(report: ReconciliationReport, manifest: dict[str, object]) -> bool:
 
 
 # ----------------------------------------------------------------------
-def naive_comparison_count(
-    records: Sequence[SettlementRecord], orders: Sequence[Order]
-) -> tuple[int, float]:
-    """不建索引的暴力法：每筆未匹配的結算列都跟所有訂單比一次。
+def naive_comparison_timing(report: ReconciliationReport, orders: Sequence[Order]) -> float:
+    """量測不建索引時，Stage 3 那一段要花多久。
 
-    實際跑一遍而不是只算理論值，因為要量測真實耗時。
+    次數由引擎自己回報（``metrics.naive_comparisons``），這裡只補時間——
+    次數的定義只能有一個地方說了算，不然文件、前端、benchmark 三邊
+    遲早會各說各話。之前就是這樣：前端拿「全部訂單 × 全部結算列」當分母，
+    benchmark 拿「無編號列 × 全部訂單」，兩個都不是公平的對照。
+
+    公平的對照是「進入 Stage 3 的列 × 還沒被前兩階段認領的訂單」：
+    不建索引的實作一樣知道哪些訂單已經配掉了，跳過它們不需要索引。
     """
     config = MatchingConfig()
-    unkeyed = [r for r in records if normalize_order_id(r.external_order_id) is None]
+    unmatched = [
+        r for result in report.results for r in result.records if result.stage is MatchStage.FUZZY
+    ]
+    if not unmatched:
+        unmatched = [r for result in report.results for r in result.records][:1]
+    per_call = report.metrics.naive_comparisons
+    sample = min(len(orders), 50) or 1
     started = time.perf_counter()
-    comparisons = 0
-    for record in unkeyed:
-        for order in orders:
-            comparisons += 1
+    for record in unmatched[:1] or []:
+        for order in orders[:sample]:
             _score(record, order, config)
-    return comparisons, time.perf_counter() - started
+    measured = time.perf_counter() - started
+    # 單次比對的成本 × 公平基準的次數
+    return measured / sample * per_call if sample else 0.0
 
 
 def scaling_test() -> None:
@@ -212,7 +221,10 @@ def scaling_test() -> None:
     print()
     print("  n = 訂單筆數。索引版每筆只跟同桶與相鄰桶的候選比對，")
     print("  暴力版每筆都跟所有訂單比。\n")
-    print(f"  {'n':>6}  {'索引版':>12}  {'暴力版':>14}  {'倍數':>8}  {'索引耗時':>10}")
+    print(
+        f"  {'n':>6}  {'索引版':>10}  {'暴力版':>12}  {'倍數':>7}"
+        f"  {'平均候選 k':>11}  {'剩餘訂單':>9}"
+    )
     rule()
 
     for size in (250, 500, 1000, 2000):
@@ -234,20 +246,29 @@ def scaling_test() -> None:
             records = load_settlements(out)
             report = reconcile(orders, records)
             indexed = report.metrics.candidate_comparisons
-            naive, _naive_time = naive_comparison_count(records, orders)
+            naive = report.metrics.naive_comparisons
             ratio = naive / indexed if indexed else 0
+            m = report.metrics
+            pool = m.naive_comparisons // m.fuzzy_record_count if m.fuzzy_record_count else 0
             print(
-                f"  {size:>6}  {indexed:>12,}  {naive:>14,}  "
-                f"{ratio:>7.0f}×  {report.metrics.elapsed_seconds * 1000:>8.1f} ms"
+                f"  {size:>6}  {indexed:>10,}  {naive:>12,}  {ratio:>6.1f}×"
+                f"  {m.mean_candidates:>11.1f}  {pool:>9,}"
             )
 
     print()
-    print("  暴力版是標準的 O(n²)：n 變 8 倍，比對次數變約 44 倍。")
-    print("  索引版明顯低於平方成長，但**不是**線性——n 變 8 倍時約 30 倍，")
-    print("  大約 O(n^1.6)。原因是訂單變多時每個桶裡的候選也跟著變多，")
-    print("  所以 O(n·k) 裡的 k 本身會隨 n 成長。要壓回接近線性，")
-    print("  桶寬必須隨資料量縮小（同時把金額容差一起調緊）。")
-    print("  這是目前設計的已知限制，寫在這裡而不是假裝它是線性的。")
+    print("  該看的是最後兩欄。")
+    print()
+    print("  「剩餘訂單」是不建索引時每一列要掃過的數量，它隨 n 線性成長——")
+    print("  所以暴力版是 O(n²)。索引把它換成「平均候選 k」，但 k **也**在成長：")
+    print("  商品價格範圍是固定的，訂單變多時每個金額桶裡就塞更多訂單。")
+    print()
+    print("  結論要說清楚：在這個資料分佈下，金額分桶帶來的是**常數因子**的")
+    print("  改善（約 10～15 倍），不是漸近複雜度的改善。索引版實測約 O(n^1.6)，")
+    print("  暴力版約 O(n^1.8)，兩條曲線是平行往上而不是拉開。")
+    print()
+    print("  要真正壓成 O(n·k)、k 不隨 n 成長，桶寬必須隨資料密度縮小")
+    print("  （同時把金額容差一起調緊）。這是目前設計的已知限制，")
+    print("  寫在這裡而不是假裝它是漸近改善。")
 
 
 # ----------------------------------------------------------------------
@@ -291,11 +312,16 @@ def main() -> int:
     print(f"  吞吐量                  {m.throughput:>7,.0f} 列/秒")
 
     print("\n  Stage 3 候選比對：")
-    naive, naive_time = naive_comparison_count(records, orders)
+    naive_time = naive_comparison_timing(report, orders)
+    naive = m.naive_comparisons
     print(f"    建索引    {m.candidate_comparisons:>10,} 次")
     print(
         f"    不建索引  {naive:>10,} 次"
-        f"（{naive / m.candidate_comparisons:.0f} 倍，耗時 {naive_time * 1000:.0f} ms）"
+        f"（{naive / m.candidate_comparisons:.1f} 倍，約 {naive_time * 1000:.1f} ms）"
+    )
+    print(
+        "    基準是「進入 Stage 3 的列 × 尚未被認領的訂單」，"
+        "不是全部列 × 全部訂單——後者會把倍數誇大一個數量級。"
     )
 
     if args.scaling:

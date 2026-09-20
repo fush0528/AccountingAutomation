@@ -115,7 +115,22 @@ def main() -> int:
     if args.fresh and args.database_url.startswith("sqlite:///"):
         db_file = Path(args.database_url.removeprefix("sqlite:///"))
         if db_file.exists():
-            db_file.unlink()
+            try:
+                db_file.unlink()
+            except PermissionError:
+                # Windows 不允許刪除被開著的檔案。實務上這幾乎一定是
+                # 前一個伺服器還在跑——這是最容易踩到的入門障礙，
+                # 所以給明確的排除步驟，而不是丟一整串 traceback。
+                print(f"\n無法刪除 {db_file.name}——檔案正被另一個程序使用。")
+                print("\n幾乎可以確定是前一個伺服器還開著。處理方式：")
+                print("  1. 找到在跑伺服器的那個視窗，按 Ctrl+C")
+                print("  2. 找不到的話（Windows）：")
+                print(f"       netstat -ano | findstr :{args.port}")
+                print("       taskkill /F /PID <最後一欄的數字>")
+                print("     macOS / Linux：")
+                print(f"       lsof -ti :{args.port} | xargs kill")
+                print("\n關掉之後再執行一次同樣的指令。")
+                return 1
             print(f"已刪除 {db_file.name}")
 
     # create_app 會順便建立資料表（開發用；正式環境請跑 alembic upgrade head）

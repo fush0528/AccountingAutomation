@@ -191,16 +191,38 @@ export function OverviewView({
 
             <h3 style={{ marginTop: 26, marginBottom: 8 }}>索引的效果</h3>
             <p style={{ fontSize: "0.88rem", color: "var(--ink-2)" }}>
-              Stage 3 實際比對了{" "}
+              進到 Stage 3 的{" "}
+              <strong className="num">{metrics.fuzzy_record_count}</strong> 列，
+              建索引後實際比對{" "}
               <strong className="num">
                 {metrics.candidate_comparisons.toLocaleString()}
               </strong>{" "}
-              次。若不建索引、每筆未匹配的結算列都跟所有訂單比一遍，會是{" "}
+              次；不建索引要{" "}
               <strong className="num">
-                {(metrics.order_count * metrics.record_count).toLocaleString()}
+                {metrics.naive_comparisons.toLocaleString()}
               </strong>{" "}
-              次。
+              次（
+              {metrics.candidate_comparisons > 0
+                ? (
+                    metrics.naive_comparisons / metrics.candidate_comparisons
+                  ).toFixed(1)
+                : "—"}
+              倍）。
             </p>
+            {/*
+              這個對照基準的分母來自後端的 `naive_comparisons`，不是前端自己
+              用 order_count × record_count 乘出來的。原本就是那樣寫的，
+              結果把倍數誇大了一個數量級——Stage 3 只處理前兩階段配不掉的列，
+              而且不建索引的實作一樣知道哪些訂單已經配掉了。
+              前端重算業務邏輯，算出來的通常是對自己有利的那個版本。
+            */}
+            <div className="note-strip">
+              <strong>這是常數因子的改善，不是漸近改善。</strong>
+              商品價格範圍固定，訂單變多時每個金額桶裡就塞更多訂單——
+              平均候選數 k 會跟著 n 一起長。實測索引版約 O(n^1.6)、
+              暴力版約 O(n^1.8)，兩條曲線平行往上。詳見{" "}
+              <code>benchmark.py --scaling</code>。
+            </div>
           </div>
         </>
       )}

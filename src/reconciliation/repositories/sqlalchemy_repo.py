@@ -301,6 +301,8 @@ def _metrics_to_dict(metrics: ReconciliationMetrics) -> dict[str, object]:
         "needs_review": metrics.needs_review,
         "elapsed_seconds": metrics.elapsed_seconds,
         "candidate_comparisons": metrics.candidate_comparisons,
+        "fuzzy_record_count": metrics.fuzzy_record_count,
+        "naive_comparisons": metrics.naive_comparisons,
     }
 
 
@@ -321,4 +323,6 @@ def _metrics_from_dict(data: dict[str, object]) -> ReconciliationMetrics:
         needs_review=int(str(data.get("needs_review", 0))),
         elapsed_seconds=float(str(data["elapsed_seconds"])),
         candidate_comparisons=int(str(data["candidate_comparisons"])),
+        fuzzy_record_count=int(str(data.get("fuzzy_record_count", 0))),
+        naive_comparisons=int(str(data.get("naive_comparisons", 0))),
     )

@@ -1,0 +1,223 @@
+# CI：把 README 裡的每一句宣稱變成每次 push 都會被檢查的東西。
+#
+# 這份設定的組織原則不是「跑一下測試」，而是**每個 job 對應一個會腐爛的承諾**：
+#
+#   quality    程式碼風格與型別（含分層規則的架構測試）
+#   test       三個 Python 版本都能跑，覆蓋率不掉
+#   postgres   「換連線字串就能換資料庫」——同一份測試指向真的 PostgreSQL 16
+#   frontend   前端型別確實是從後端 OpenAPI 產生的，沒有手改也沒有過期
+#   benchmark  README 上那些數字現在仍然成立（拿 ground truth 對答案）
+#
+# 後三個是這份設定真正的價值。前兩個任何專案都有。
+
+name: CI
+
+on:
+  push:
+    branches: [main, refactor]
+  pull_request:
+    branches: [main]
+
+# 同一個分支連續 push 時取消前一次的執行，不浪費 runner
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_DEFAULT: "3.12"
+
+jobs:
+  quality:
+    name: 風格與型別
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安裝
+        run: pip install -e ".[dev]"
+
+      - name: ruff
+        run: python -m ruff check --output-format=github .
+
+      - name: mypy（strict）
+        run: python -m mypy src scripts tests
+
+      # 分層規則（domain/ 不 import 框架、依賴只能向內、沒有原生 SQL）
+      # 單獨跑一次，讓它在 CI 上是一個獨立可見的結果，而不是埋在 247 個測試裡。
+      - name: 架構分層規則
+        run: python -m pytest tests/architecture -v --no-header -p no:cacheprovider
+
+  test:
+    name: 測試 (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安裝
+        run: pip install -e ".[dev]"
+
+      # pyproject 的 filterwarnings = ["error"] 讓 DeprecationWarning 直接失敗。
+      # 這在跨版本矩陣裡是刻意的：新版 Python 或新版套件的棄用警告會在這裡
+      # 立刻現形，而不是等到某天真的被移除才爆炸。
+      - name: pytest ＋ 覆蓋率
+        run: python -m pytest --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=90
+
+      - name: 上傳覆蓋率報告
+        if: matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          retention-days: 14
+
+  postgres:
+    name: 資料庫可替換性（PostgreSQL 16）
+    runs-on: ubuntu-latest
+
+    # README 主張「SQLite 換 PostgreSQL 只需要改連線字串」。這個 job 的存在
+    # 就是為了讓那句話無法腐爛：同一份 tests/api，只改環境變數，必須同樣通過。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: recon
+          POSTGRES_PASSWORD: recon
+          POSTGRES_DB: recon_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U recon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # 兩個變數指向同一個資料庫，但用途不同：
+      #   RECONCILIATION_DATABASE_URL       alembic（migrations/env.py 讀這個）
+      #   RECONCILIATION_TEST_DATABASE_URL  pytest（tests/api/conftest.py 讀這個）
+      RECONCILIATION_DATABASE_URL: postgresql+psycopg://recon:recon@localhost:5432/recon_test
+      RECONCILIATION_TEST_DATABASE_URL: postgresql+psycopg://recon:recon@localhost:5432/recon_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安裝（含 postgres 驅動）
+        run: pip install -e ".[dev,postgres]"
+
+      # migration 必須在真的 PostgreSQL 上跑得過，而不只是在 SQLite 上。
+      # `alembic check` 接著驗證 migration 與模型定義沒有漂移——
+      # 少了這一步，有人改了 tables.py 卻忘記產生 migration 也不會有人發現。
+      - name: Alembic migration
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
+
+      - name: 同一份 API 測試，指向 PostgreSQL
+        run: python -m pytest tests/api -v --no-header
+
+  frontend:
+    name: 前端型別與建置
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安裝
+        run: |
+          pip install -e ".[dev]"
+          cd frontend && npm ci
+
+      # 這是本 job 的重點。前端型別由後端的 OpenAPI 文件產生，
+      # 所以「後端改了欄位但沒有重新產生型別」是一種會靜默發生的不一致。
+      # 重新產生一次再比對 git diff：有差就代表版控裡的型別過期了。
+      - name: 型別是否與後端同步
+        run: |
+          make web-types
+          if ! git diff --exit-code -- frontend/src/api/schema.d.ts; then
+            echo "::error file=frontend/src/api/schema.d.ts::\
+          型別與後端 OpenAPI 不同步。在本機執行 \`make web-types\` 並提交結果。"
+            exit 1
+          fi
+
+      - name: TypeScript 型別檢查
+        run: cd frontend && npm run typecheck
+
+      - name: 建置
+        run: cd frontend && npm run build
+
+  benchmark:
+    name: 對帳數字的 ground truth 驗證
+    runs-on: ubuntu-latest
+
+    # README 寫著自動化率 79.6%、索引 14 倍。這個 job 讓那些數字每次 push
+    # 都被重新驗證一次：benchmark.py 拿產生器寫下的 manifest.json 逐項對答案，
+    # 任何一項不過就回傳非零。數字會過期，過期時要讓人知道。
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安裝
+        run: pip install -e ".[dev]"
+
+      - name: 產生合成資料（固定種子）
+        run: |
+          python scripts/gen_fixtures.py
+          python scripts/gen_samples.py
+
+      - name: 驗證對帳結果
+        run: python scripts/benchmark.py
+
+      - name: 解析層 smoke test
+        run: python scripts/parse_demo.py
+
+  # 給分支保護規則用的單一匯總狀態：只要盯這一個就夠了
+  all-green:
+    name: 全部通過
+    runs-on: ubuntu-latest
+    needs: [quality, test, postgres, frontend, benchmark]
+    if: always()
+    steps:
+      - name: 檢查前置 job 的結果
+        run: |
+          echo '${{ toJSON(needs) }}'
+          if echo '${{ toJSON(needs) }}' | grep -q '"result": *"\(failure\|cancelled\)"'; then
+            echo "有 job 失敗或被取消"
+            exit 1
+          fi

@@ -103,7 +103,35 @@ class ReconciliationMetrics:
     stage_fuzzy: int
     needs_review: int
     elapsed_seconds: float
+
     candidate_comparisons: int
+    """Stage 3 實際做了幾次評分比對（建了候選索引之後）。"""
+
+    fuzzy_record_count: int
+    """有幾列結算資料進到 Stage 3（前兩階段靠編號配不掉的）。
+
+    有了這個數字才算得出平均候選數 k = candidate_comparisons / fuzzy_record_count，
+    而 k 隨 n 怎麼成長，才是索引到底有沒有漸近效果的真正判準。
+    """
+
+    naive_comparisons: int
+    """同樣的工作不建索引要做幾次比對，作為對照基準。
+
+    定義是「進入 Stage 3 的結算列 × Stage 1／2 之後還沒被認領的訂單」，
+    **不是**「全部結算列 × 全部訂單」。這個區別很重要：不建索引的實作
+    一樣知道哪些訂單已經在前兩階段配掉了，跳過它們不需要任何索引。
+    拿全部訂單當分母會把索引的功勞誇大一個數量級——那是在跟一個
+    沒有人會寫的爛實作比較，不是誠實的對照。
+    """
+
+    @property
+    def mean_candidates(self) -> float:
+        """Stage 3 每一列平均要跟幾個候選比對，也就是 O(n·k) 裡的 k。"""
+        return (
+            self.candidate_comparisons / self.fuzzy_record_count
+            if self.fuzzy_record_count
+            else 0.0
+        )
 
     @property
     def total_results(self) -> int:
@@ -180,6 +208,9 @@ def reconcile(
 
     # --- Stage 3：模糊匹配 -------------------------------------------
     remaining_orders = [o for o in order_list if o.order_id not in matched_order_ids]
+    # 對照基準：不建索引時這一階段要做的比對次數。在進迴圈前算，
+    # 因為 _fuzzy_match 過程中 claimed 會長大，事後就算不回來了。
+    naive_comparisons = len(leftover_records) * len(remaining_orders)
     fuzzy_results, fuzzy_matched_ids, comparisons = _fuzzy_match(
         leftover_records, remaining_orders, config
     )
@@ -199,6 +230,8 @@ def reconcile(
         duplicates_dropped=duplicates_dropped,
         elapsed=elapsed,
         comparisons=comparisons,
+        fuzzy_record_count=len(leftover_records),
+        naive_comparisons=naive_comparisons,
     )
     return ReconciliationReport(results=tuple(results), metrics=metrics, config=config)
 
@@ -464,6 +497,8 @@ def _build_metrics(
     duplicates_dropped: int,
     elapsed: float,
     comparisons: int,
+    fuzzy_record_count: int,
+    naive_comparisons: int,
 ) -> ReconciliationMetrics:
     def count_outcome(outcome: MatchOutcome) -> int:
         return sum(1 for r in results if r.outcome is outcome)
@@ -485,4 +520,6 @@ def _build_metrics(
         needs_review=sum(1 for r in results if r.needs_review),
         elapsed_seconds=elapsed,
         candidate_comparisons=comparisons,
+        fuzzy_record_count=fuzzy_record_count,
+        naive_comparisons=naive_comparisons,
     )

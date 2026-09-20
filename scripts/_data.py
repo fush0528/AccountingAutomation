@@ -26,7 +26,10 @@ def load_orders(path: Path | None = None) -> list[Order]:
     """讀取我方訂單。"""
     path = path or DATA_DIR / "orders.csv"
     orders: list[Order] = []
-    with path.open(encoding="utf-8", newline="") as fh:
+    # utf-8-sig：檔案有沒有 BOM 都能讀。訂單檔會被人用 Excel 打開，
+    # 而 Excel 沒有 BOM 就會把中文顯示成亂碼，所以產生端會寫 BOM——
+    # 讀取端就必須容忍它，否則第一個欄位名稱會多一個看不見的字元。
+    with path.open(encoding="utf-8-sig", newline="") as fh:
         for row in csv.DictReader(fh):
             orders.append(
                 Order(
@@ -50,8 +53,11 @@ def load_settlements(directory: Path | None = None) -> list[SettlementRecord]:
     """
     directory = directory or DATA_DIR
     records: list[SettlementRecord] = []
+    # 白名單而不是黑名單：目錄裡會有 manifest.json、SAMPLES.md 這類
+    # 附屬檔案，一個個排除遲早會漏掉。只收看起來像結算單的副檔名。
+    settlement_suffixes = {".csv", ".xlsx", ".xlsm", ".txt"}
     for path in sorted(directory.iterdir()):
-        if path.name == "orders.csv" or path.suffix == ".json":
+        if path.name == "orders.csv" or path.suffix.lower() not in settlement_suffixes:
             continue
         source = SettlementSource.from_path(path)
         try:
